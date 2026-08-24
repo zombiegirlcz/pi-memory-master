@@ -1,0 +1,133 @@
+#!/bin/bash
+# qmd-server — unified local/remote QMD MCP HTTP server lifecycle for pi.
+#
+#   qmd-server start     ensure server reachable (local daemon OR remote Modal)
+#   qmd-server stop      stop it (no-op in remote mode)
+#   qmd-server status    probe and report
+#
+# Remote mode activates when /usr/local/etc/qmd-server.conf defines
+# QMD_REMOTE_URL. Auth: Modal Proxy Token (MODAL_KEY/MODAL_SECRET), sent as
+#   Authorization: Bearer <key>.<secret>
+#
+# In remote mode `start` returns immediately; a background poller waits for
+# the Modal cold start (~10-40s) so pi's session_start is never blocked.
+#
+# Local mode (no conf) reproduces the original watchdog design:
+#   - port 8182, QMD_FORCE_CPU=1, --no-gpu
+#   - pidfiles /tmp/qmd-server.pid + watchdog, log /tmp/qmd-http.log
+#   - 60 min idle -> auto stop (real requests only count as activity)
+
+CONF=/usr/local/etc/qmd-server.conf
+[ -f "$CONF" ] && . "$CONF"
+
+PORT="${QMD_PORT:-8182}"
+HOST="${QMD_HOST:-0.0.0.0}"
+IDLE_MIN="${QMD_IDLE_MIN:-60}"
+LOG="${QMD_LOG:-/tmp/qmd-http.log}"
+PIDFILE="${QMD_PIDFILE:-/tmp/qmd-server.pid}"
+WATCHDOG_PIDFILE="${QMD_WATCHDOG_PIDFILE:-/tmp/qmd-server-watchdog.pid}"
+
+bearer() { echo "Authorization: Bearer ${MODAL_KEY}.${MODAL_SECRET}"; }
+
+remote_probe() {
+  # prints HTTP code, fast
+  curl -s -o /dev/null -w '%{http_code}' --max-time 8 \
+       -H "$(bearer)" "$QMD_REMOTE_URL/health" 2>/dev/null
+}
+
+remote_wait_poller() {
+  # background: wait until remote healthy (cold start), then notify once
+  (
+    for i in $(seq 1 60); do
+      CODE=$(remote_probe)
+      if [ "$CODE" = "200" ]; then
+        echo "[qmd-server] remote ready after ~$((i * 3))s"
+        exit 0
+      fi
+      sleep 3
+    done
+    echo "[qmd-server] WARN: remote still not ready after 180s (last $CODE)"
+  ) >/tmp/qmd-server-remote.log 2>&1 &
+  disown
+}
+
+case "$1" in
+  start)
+    if [ -n "${QMD_REMOTE_URL:-}" ]; then
+      CODE=$(remote_probe)
+      case "$CODE" in
+        200)
+          echo "qmd-server: remote OK ($QMD_REMOTE_URL)"
+          ;;
+        000|401|5*)
+          # cold start / transient — poll in background, don't block pi
+          remote_wait_poller
+          echo "qmd-server: remote waking up ($CODE) — polling in background (/tmp/qmd-server-remote.log)"
+          ;;
+      esac
+      exit 0
+    fi
+
+    # ---------- local mode ----------
+    if [ -f "$PIDFILE" ]; then
+      PID=$(cat "$PIDFILE" 2>/dev/null)
+      if kill -0 "$PID" 2>/dev/null; then
+        echo "qmd-server: already running (pid $PID)"
+        exit 0
+      fi
+      rm -f "$PIDFILE"
+    fi
+    fuser -k "${PORT}/tcp" >/dev/null 2>&1 || true
+    sleep 1
+    QMD_HOST="$HOST" QMD_FORCE_CPU=1 \
+      nohup qmd mcp --http --port "$PORT" --no-gpu >"$LOG" 2>&1 &
+    echo $! > "$PIDFILE"
+    disown
+    sleep 2
+    echo "qmd-server: started locally on $HOST:$PORT (pid $(cat "$PIDFILE"), log $LOG)"
+    ;;
+
+  stop)
+    if [ -n "${QMD_REMOTE_URL:-}" ]; then
+      echo "qmd-server: remote mode — nothing to stop (Modal scales down on its own)"
+      exit 0
+    fi
+    if [ -f "$PIDFILE" ]; then
+      PID=$(cat "$PIDFILE" 2>/dev/null)
+      kill "$PID" 2>/dev/null || true
+      sleep 1
+      rm -f "$PIDFILE"
+    fi
+    if [ -f "$WATCHDOG_PIDFILE" ]; then
+      kill "$(cat "$WATCHDOG_PIDFILE")" 2>/dev/null || true
+      rm -f "$WATCHDOG_PIDFILE"
+    fi
+    fuser -k "${PORT}/tcp" >/dev/null 2>&1 || true
+    echo "qmd-server: stopped"
+    ;;
+
+  status)
+    if [ -n "${QMD_REMOTE_URL:-}" ]; then
+      CODE=$(remote_probe)
+      if [ "$CODE" = "200" ]; then
+        BODY=$(curl -s --max-time 8 -H "$(bearer)" "$QMD_REMOTE_URL/health")
+        echo "REMOTE RUNNING: $BODY ($QMD_REMOTE_URL)"
+      else
+        echo "REMOTE NOT READY (HTTP $CODE) — will cold-start on next use"
+      fi
+      exit 0
+    fi
+    if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+      H=$(curl -s --max-time 3 "http://127.0.0.1:$PORT/health" || true)
+      [ -n "$H" ] && echo "LOCAL RUNNING: $H" || echo "STALE pidfile (not responding)"
+    else
+      [ -f "$PIDFILE" ] && rm -f "$PIDFILE"
+      echo "LOCAL NOT RUNNING"
+    fi
+    ;;
+
+  *)
+    echo "usage: qmd-server {start|stop|status}" >&2
+    exit 2
+    ;;
+esac

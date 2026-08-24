@@ -1,0 +1,71 @@
+#!/bin/bash
+# qmd — remote shim. Translates local qmd CLI calls to the Modal-hosted
+# QMD HTTP server so tools built around the CLI (e.g. pi-memory) keep
+# working with ZERO local llama.cpp/CPU usage.
+#
+# Config: /usr/local/etc/qmd-server.conf  (QMD_REMOTE_URL, MODAL_KEY, MODAL_SECRET)
+#
+# Supported:
+#   qmd search|vsearch|query <q> --json [-c NAME] [-n N] [other flags ignored]
+#   qmd collection list [--json]        -> fabricated from config
+#   qmd collection add/context add/update/embed/get/multi-get/status -> graceful no-op
+# Auth: Authorization: Bearer $MODAL_KEY.$MODAL_SECRET
+
+CONF=/usr/local/etc/qmd-server.conf
+[ -f "$CONF" ] && . "$CONF"
+
+URL="${QMD_REMOTE_URL:-}"
+if [ -z "$URL" ]; then
+  echo "qmd-shim: QMD_REMOTE_URL not configured ($CONF)" >&2
+  exit 1
+fi
+AUTH="Authorization: Bearer ${MODAL_KEY}.${MODAL_SECRET}"
+
+emit_results() {  # $1=type  rest=query words; parses CLI flags -c/-n/--json
+  local type="$1"; shift
+  local query="" col="" n=5 json=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -c) col="$2"; shift 2;;
+      -n) n="$2"; shift 2;;
+      --json|-j) json=1; shift;;
+      --*) shift;;
+      *) query="${query:+$query }$1"; shift;;
+    esac
+  done
+  # type mapping: search->lex, vsearch->vec, query->hybrid (lex+vec)
+  local searches="[{\"type\":\"$type\",\"query\":\"$query\"}]"
+  if [ "$type" = "hyde" ] || [ "$type" = "hybrid" ]; then
+    searches="[{\"type\":\"lex\",\"query\":\"$query\"},{\"type\":\"vec\",\"query\":\"$query\"}]"
+  fi
+  local cols=""
+  [ -n "$col" ] && cols=",\"collections\":[\"$col\"]"
+  local body="{\"searches\":$searches,\"limit\":$n,\"rerank\":false$cols}"
+  curl -s --max-time 55 -X POST -H "$AUTH" -H "Content-Type: application/json" \
+       -d "$body" "$URL/query"
+}
+
+cmd="$1"; shift || true
+case "$cmd" in
+  search)      emit_results lex "$@" ;;
+  vsearch)     emit_results vec "$@" ;;
+  query)       emit_results hybrid "$@" ;;
+  collection)
+    sub="$1"; shift || true
+    case "$sub" in
+      list)
+        if [ "${1:-}" = "--json" ]; then
+          echo '[{"name":"pi-memory","pwd":"/remote","glob_pattern":"**/*.md","doc_count":3630,"active_count":3630,"includeByDefault":true}]'
+        else
+          echo "pi-memory  (remote)"
+        fi ;;
+      *) exit 0 ;;   # add/remove/rename/show -> no-op success
+    esac ;;
+  context)     exit 0 ;;  # add/list/rm -> no-op
+  update|embed|cleanup|pull) exit 0 ;;  # background jobs -> nothing to do remotely
+  status)      curl -s --max-time 8 -H "$AUTH" "$URL/health" && echo ;;
+  get|multi-get|ls|doctor|init|trust|bench)
+    echo "qmd-shim: '$cmd' not supported remotely" >&2; exit 2 ;;
+  --version|-v) echo "qmd-shim 1.0 (remote: ${URL:-none})" ;;
+  *)           echo "qmd-shim: unknown command '$cmd'" >&2; exit 2 ;;
+esac
