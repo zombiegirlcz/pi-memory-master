@@ -98,6 +98,7 @@ export default function (pi: ExtensionAPI) {
 				kind: SpanKind.INTERNAL,
 				startTime: Date.now(),
 				attributes: {
+					"openinference.span.kind": "AGENT",
 					"pi.prompt": String(event.prompt ?? "").slice(0, 2000),
 					"session.model": modelName,
 				},
@@ -116,6 +117,7 @@ export default function (pi: ExtensionAPI) {
 				kind: SpanKind.CLIENT,
 				startTime: m.timestamp ?? Date.now(),
 				attributes: {
+					"openinference.span.kind": "LLM",
 					"llm.model_name": String(m.modelID ?? m.model ?? "?"),
 					"llm.provider": String(m.provider ?? "?"),
 					"llm.token_count.prompt": usage.input ?? 0,
@@ -143,6 +145,7 @@ export default function (pi: ExtensionAPI) {
 				kind: SpanKind.INTERNAL,
 				startTime: Date.now(),
 				attributes: {
+					"openinference.span.kind": "TOOL",
 					"tool.name": event.toolName,
 					"tool.args": JSON.stringify(event.args ?? {}).slice(0, 1000),
 				},
