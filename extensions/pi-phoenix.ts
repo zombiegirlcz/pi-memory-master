@@ -9,7 +9,7 @@
  * Config (env overrides conf file):
  *   PI_PHOENIX_URL    e.g. https://ttdudd7d--phoenix.modal.run
  *   PI_PHOENIX_TOKEN  Modal proxy token "wk-xxx.ws-yyy" (Bearer)
- * Conf file: /usr/local/etc/pi-phoenix.conf  (KEY=VALUE lines)
+ * Conf file: /root/.local/etc/pi-phoenix.conf  (KEY=VALUE lines)
  *
  * Project name in Phoenix: "pi" (resource service.name).
  * If URL/token missing the extension stays inert — zero overhead.
@@ -45,7 +45,7 @@ function loadConf(): Conf {
 		project: process.env.PI_PHOENIX_PROJECT ?? "pi",
 	};
 	try {
-		const txt = readFileSync("/usr/local/etc/pi-phoenix.conf", "utf8");
+		const txt = readFileSync("/root/.local/etc/pi-phoenix.conf", "utf8");
 		for (const line of txt.split("\n")) {
 			const m = line.match(/^\s*([A-Z_]+)\s*=\s*(.+?)\s*$/);
 			if (!m) continue;
