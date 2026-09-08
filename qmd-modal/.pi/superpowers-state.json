@@ -1,0 +1,58 @@
+{
+  "workflow": {
+    "phases": {
+      "brainstorm": "pending",
+      "plan": "pending",
+      "execute": "active",
+      "verify": "pending",
+      "review": "pending",
+      "finish": "pending"
+    },
+    "currentPhase": "execute",
+    "artifacts": {
+      "brainstorm": null,
+      "plan": null,
+      "execute": null,
+      "verify": null,
+      "review": null,
+      "finish": null
+    },
+    "prompted": {
+      "brainstorm": false,
+      "plan": false,
+      "execute": false,
+      "verify": false,
+      "review": false,
+      "finish": false
+    }
+  },
+  "tdd": {
+    "phase": "red-pending",
+    "testFiles": [
+      "/root/elf_loader/test/hello.c",
+      "/root/elf_loader/test/ifunc.c",
+      "/root/elf_loader/test/mods/libmod.c",
+      "/root/elf_loader/test/use_mod.c",
+      "/root/elf_loader/test/tls.c",
+      "/root/elf_loader/test/tls-gd.c",
+      "/root/elf_loader/test/env.c",
+      "/root/elf_loader/test/math.c",
+      "/root/elf_loader/test/mod.c"
+    ],
+    "sourceFiles": [
+      "/root/qmd-modal/infra.py",
+      "/root/docs_config_memo/qmd-modal/infra.py",
+      "/root/pi-memory-master/extensions/pi-phoenix.ts"
+    ],
+    "redVerificationPending": true
+  },
+  "debug": {
+    "active": false,
+    "investigated": true,
+    "fixAttempts": 0
+  },
+  "verification": {
+    "verified": false,
+    "verificationWaived": false
+  }
+}

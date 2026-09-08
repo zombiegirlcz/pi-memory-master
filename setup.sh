@@ -77,6 +77,15 @@ PI_PHOENIX_URL=$PHX_URL_DEFAULT
 PI_PHOENIX_TOKEN=$TOKEN
 "
 
+# --- 4) qmd-modal project -------------------------------------------------
+# Copies the qmd-modal deployment project into PREFIX/share/qmd-modal
+# so infra.py, trace/, and test_trace.py are available for maintenance.
+QMD_MODAL_DIR="$PREFIX/share/qmd-modal"
+mkdir -p "$QMD_MODAL_DIR"
+cp -r "$(dirname "$0")/qmd-modal"/* "$QMD_MODAL_DIR/"
+chmod +x "$QMD_MODAL_DIR/sync_data.sh" "$QMD_MODAL_DIR/sync_memory.sh" 2>/dev/null || true
+echo "✓ $QMD_MODAL_DIR"
+
 echo
 echo "Done. If you passed no --key/--secret, edit token placeholders in:"
 echo "  $ETC/qmd-server.conf , $ETC/pi-phoenix.conf"
