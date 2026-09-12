@@ -11,7 +11,30 @@ zůstávají lehké, veškerý embedding/reranking/tracing běží na Modal serv
 | `extensions/pi-phoenix.ts` | OTel tracing: spany `pi.turn` / `llm.call` (tokeny+cost) / `tool.execute` → Phoenix projekt `pi` |
 | `bin/qmd-server` | wrapper `start\|stop\|status`; remote mód dle confu, fallback lokální daemon |
 | `bin/qmd-shim` | `qmd` CLI shim — překládá `search/vsearch/query` na Modal HTTP; `update/embed` jsou no-op (telefon nic nepočítá) |
-| `setup.sh` | instalace wrapperu + shimu + unifikovaného configu (BEZ Modal deploye) |
+| `mcp/qmd-modal-server.mjs` | stdio **MCP server pro pi-mcp** — `deploy` + všechny funkce z `infra.py` (auto-registrace přes `pi.mcp`) |
+| `setup.sh` | instalace wrapperu + shimu + MCP serveru + unifikovaného configu (BEZ Modal deploye) |
+
+## pi-mcp (MCP server)
+
+Balíček deklaruje MCP server v `package.json` (`"pi.mcp": "./mcp/qmd-modal.mcp.json"`),
+takže se po instalaci **sám zaregistruje** v pi-mcp pod jménem
+`pi_memory_master__qmd-modal` (není třeba ručně editovat `~/.config/mcp/mcp.json`).
+`setup.sh` instaluje spustitelný launcher `qmd-modal-mcp` (čistý stdlib Node,
+žádné npm závislosti).
+
+| Tool | Co dělá |
+|---|---|
+| `deploy` | `modal deploy infra.py` — nasadí `qmd-mcp` + `phoenix` |
+| `status` | poslední běh caretakera (`infra.py::status`) |
+| `sync_data` | tar všech `*.md` + `index.yml` → volume → extract |
+| `sync_memory` | rychlý sync jen `pi-memory` + rebuild kolekce |
+| `reindex` / `embed_batch` / `pull_models` / `rebuild_pi_memory` | odpovídající `infra.py` funkce |
+| `diag` / `caretaker` / `check_llm_env` | diagnostika a údržba |
+| `health` | probe `qmd-mcp /health` + `phoenix /ping` |
+| `search` | vzdálený QMD dotaz (`lex`/`vec`/`hybrid`, `collection`, `limit`, `rerank`) |
+
+Server lokalizuje `qmd-modal/` přes `QMD_MODAL_DIR`, strom balíčku nebo
+`/usr/local/share/qmd-modal`; config čte z `~/.local/etc/pi-memory.conf`.
 
 ## Instalace
 

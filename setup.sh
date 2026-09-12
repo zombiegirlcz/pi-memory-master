@@ -6,6 +6,9 @@
 #   <PATH>/qmd                    remote shim — translates qmd CLI -> Modal HTTP
 #                                 (keeps pi-memory's memory_search working with
 #                                  zero local llama.cpp / zero background CPU)
+#   <PREFIX>/bin/qmd-modal-mcp    stdio MCP server for pi-mcp (deploy + all
+#                                 infra.py functions); auto-registered via
+#                                 package.json "pi.mcp" -> mcp/qmd-modal.mcp.json
 #   ~/.local/etc/pi-memory.conf   UNIFIED config: QMD URL + Modal tokens
 #                                 (same file read by extensions/pi-phoenix.ts)
 #
@@ -56,6 +59,10 @@ if command -v qmd >/dev/null 2>&1 && [ ! -f "$TARGET_QMD" ]; then
 fi
 install -m 755 "$(dirname "$0")/bin/qmd-shim" "$TARGET_QMD"
 echo "✓ $TARGET_QMD"
+
+# --- 2b) qmd-modal MCP server (pi-mcp) --------------------------------------
+install -m 755 "$(dirname "$0")/mcp/qmd-modal-server.mjs" "$PREFIX_BIN/bin/qmd-modal-mcp"
+echo "✓ $PREFIX_BIN/bin/qmd-modal-mcp (pi-mcp: deploy + all infra.py functions)"
 
 # --- 3) unified config (never overwrite) ------------------------------------
 # Reads a KEY=VALUE from the first legacy file that defines it, so an install

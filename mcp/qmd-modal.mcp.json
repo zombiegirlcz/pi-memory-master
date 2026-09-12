@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "qmd-modal": {
+      "command": "qmd-modal-mcp",
+      "protocolVersion": "legacy",
+      "lifecycle": "lazy",
+      "idleTimeout": 30
+    }
+  }
+}

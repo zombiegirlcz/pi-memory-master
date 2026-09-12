@@ -12,6 +12,7 @@
     "@opentelemetry/exporter-trace-otlp-proto": "^0.57.2"
   },
   "pi": {
-    "extensions": ["extensions"]
+    "extensions": ["extensions"],
+    "mcp": "./mcp/qmd-modal.mcp.json"
   }
 }
