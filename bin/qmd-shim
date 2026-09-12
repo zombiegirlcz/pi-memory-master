@@ -11,7 +11,9 @@
 #   qmd search|vsearch|query <q> --json [-c NAME] [-n N] [other flags ignored]
 #   qmd collection list [--json]        -> fabricated from config
 #   qmd collection add/context add/update/embed/get/multi-get/status -> graceful no-op
-# Auth: Authorization: Bearer $MODAL_KEY.$MODAL_SECRET
+# Auth: Modal Proxy Token (QMD_PROXY_TOKEN, else PI_PHOENIX_TOKEN).
+#   NB: MODAL_KEY/MODAL_SECRET is the Modal API token and the deployed
+#   qmd-mcp proxy rejects it — the web endpoints need the proxy token.
 
 CONF="${PI_MEMORY_CONF:-$HOME/.local/etc/pi-memory.conf}"
 [ -f "$CONF" ] && . "$CONF"
@@ -21,7 +23,7 @@ if [ -z "$URL" ]; then
   echo "qmd-shim: QMD_REMOTE_URL not configured ($CONF)" >&2
   exit 1
 fi
-AUTH="Authorization: Bearer ${MODAL_KEY}.${MODAL_SECRET}"
+AUTH="Authorization: Bearer ${QMD_PROXY_TOKEN:-${PI_PHOENIX_TOKEN:-${MODAL_KEY}.${MODAL_SECRET}}}"
 
 emit_results() {  # $1=type  rest=query words; parses CLI flags -c/-n/--json
   local type="$1"; shift

@@ -6,8 +6,9 @@
 #   qmd-server status    probe and report
 #
 # Remote mode activates when ~/.local/etc/pi-memory.conf defines
-# QMD_REMOTE_URL. Auth: Modal Proxy Token (MODAL_KEY/MODAL_SECRET), sent as
-#   Authorization: Bearer <key>.<secret>
+# QMD_REMOTE_URL. Auth: Modal Proxy Token — QMD_PROXY_TOKEN, else
+# PI_PHOENIX_TOKEN (the deployed qmd-mcp proxy checks PROXY_TOKEN == PHOENIX_TOKEN;
+# MODAL_KEY/MODAL_SECRET is the Modal API token and is rejected).
 #
 # In remote mode `start` returns immediately; a background poller waits for
 # the Modal cold start (~10-40s) so pi's session_start is never blocked.
@@ -27,7 +28,7 @@ LOG="${QMD_LOG:-/tmp/qmd-http.log}"
 PIDFILE="${QMD_PIDFILE:-/tmp/qmd-server.pid}"
 WATCHDOG_PIDFILE="${QMD_WATCHDOG_PIDFILE:-/tmp/qmd-server-watchdog.pid}"
 
-bearer() { echo "Authorization: Bearer ${MODAL_KEY}.${MODAL_SECRET}"; }
+bearer() { echo "Authorization: Bearer ${QMD_PROXY_TOKEN:-${PI_PHOENIX_TOKEN:-${MODAL_KEY}.${MODAL_SECRET}}}"; }
 
 remote_probe() {
   # prints HTTP code, fast

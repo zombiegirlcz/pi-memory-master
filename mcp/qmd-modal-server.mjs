@@ -137,9 +137,13 @@ const bashScript = (name, timeoutMs = 1_800_000) => run("bash", [join(MODAL_DIR,
 // -------------------------------------------------------------- HTTP tools
 
 function qmdToken(conf) {
+  // The deployed qmd-mcp proxy checks PROXY_TOKEN == PHOENIX_TOKEN (Modal
+  // proxy token, wk-...ws-...). MODAL_KEY/MODAL_SECRET (ak-...as-...) is the
+  // Modal API token and is NOT accepted by the web endpoints.
   if (process.env.QMD_PROXY_TOKEN) return process.env.QMD_PROXY_TOKEN;
+  if (conf.PI_PHOENIX_TOKEN) return conf.PI_PHOENIX_TOKEN;
   if (conf.MODAL_KEY && conf.MODAL_SECRET) return `${conf.MODAL_KEY}.${conf.MODAL_SECRET}`;
-  return conf.PI_PHOENIX_TOKEN ?? "";
+  return "";
 }
 
 async function probe(label, url, token, path) {

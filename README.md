@@ -57,6 +57,12 @@ staré `qmd-server.conf` / `pi-phoenix.conf` umí migrovat).
 Cestu lze přebít `PI_MEMORY_CONF=/path/to/file` (čtou ji obě extenze i
 `bin/qmd-server` a `bin/qmd-shim`).
 
+⚠️ `PI_PHOENIX_TOKEN` je **Modal Proxy Token** (`wk-…ws-…`) a používá se pro
+**oba** webové endpointy (`qmd-mcp` i `phoenix` — nasazený proxy kontroluje
+`PROXY_TOKEN == PHOENIX_TOKEN`). `MODAL_KEY`/`MODAL_SECRET` (`ak-…as-…`) je
+**Modal API token** a slouží jen `modal` CLI (deploy/run), webové endpointy ho
+odmítají (401).
+
 Bez URL/tokenu jsou extenze inertní (žádné errory, žádný provoz).
 
 ## Server side (předpoklad)
