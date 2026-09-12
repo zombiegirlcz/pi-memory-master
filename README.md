@@ -11,7 +11,7 @@ zůstávají lehké, veškerý embedding/reranking/tracing běží na Modal serv
 | `extensions/pi-phoenix.ts` | OTel tracing: spany `pi.turn` / `llm.call` (tokeny+cost) / `tool.execute` → Phoenix projekt `pi` |
 | `bin/qmd-server` | wrapper `start\|stop\|status`; remote mód dle confu, fallback lokální daemon |
 | `bin/qmd-shim` | `qmd` CLI shim — překládá `search/vsearch/query` na Modal HTTP; `update/embed` jsou no-op (telefon nic nepočítá) |
-| `setup.sh` | instalace wrapperu + shimu + konfigů (BEZ Modal deploye) |
+| `setup.sh` | instalace wrapperu + shimu + unifikovaného configu (BEZ Modal deploye) |
 
 ## Instalace
 
@@ -22,14 +22,17 @@ cd ~/.pi/agent/git/github.com/<user>/pi-memory-master  # adresář z `pi list`
 ```
 
 Proxy Token: modal.com dashboard → Settings → Proxy Tokens.
-Konfigy: `/usr/local/etc/qmd-server.conf`, `/usr/local/etc/pi-phoenix.conf` (setup nikdy nepřepisuje existující).
+Konfig: `~/.local/etc/pi-memory.conf` (setup nikdy nepřepisuje existující;
+staré `qmd-server.conf` / `pi-phoenix.conf` umí migrovat).
 
 ## Konfigurace
 
 | Soubor | Klíče |
 |---|---|
-| `qmd-server.conf` | `QMD_REMOTE_URL`, `MODAL_KEY`, `MODAL_SECRET` |
-| `pi-phoenix.conf` | `PI_PHOENIX_URL`, `PI_PHOENIX_TOKEN` |
+| `~/.local/etc/pi-memory.conf` | `QMD_REMOTE_URL`, `MODAL_KEY`, `MODAL_SECRET`, `PI_PHOENIX_URL`, `PI_PHOENIX_TOKEN` |
+
+Cestu lze přebít `PI_MEMORY_CONF=/path/to/file` (čtou ji obě extenze i
+`bin/qmd-server` a `bin/qmd-shim`).
 
 Bez URL/tokenu jsou extenze inertní (žádné errory, žádný provoz).
 

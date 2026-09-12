@@ -3,7 +3,9 @@
 # QMD HTTP server so tools built around the CLI (e.g. pi-memory) keep
 # working with ZERO local llama.cpp/CPU usage.
 #
-# Config: /usr/local/etc/qmd-server.conf  (QMD_REMOTE_URL, MODAL_KEY, MODAL_SECRET)
+# Config: ~/.local/etc/pi-memory.conf  (unified; QMD_REMOTE_URL, MODAL_KEY, MODAL_SECRET)
+#   — same file is read by bin/qmd-server and extensions/pi-phoenix.ts.
+#   Override location with PI_MEMORY_CONF=/path/to/file.
 #
 # Supported:
 #   qmd search|vsearch|query <q> --json [-c NAME] [-n N] [other flags ignored]
@@ -11,7 +13,7 @@
 #   qmd collection add/context add/update/embed/get/multi-get/status -> graceful no-op
 # Auth: Authorization: Bearer $MODAL_KEY.$MODAL_SECRET
 
-CONF=/usr/local/etc/qmd-server.conf
+CONF="${PI_MEMORY_CONF:-$HOME/.local/etc/pi-memory.conf}"
 [ -f "$CONF" ] && . "$CONF"
 
 URL="${QMD_REMOTE_URL:-}"

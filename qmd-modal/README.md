@@ -9,7 +9,8 @@ Všechna těžká práce běží na Modalu (scale-to-zero, žádné GPU náklady
 | QMD search | `https://ttdudd7d--qmd-mcp.modal.run` | `Authorization: Bearer <key>.<secret>` |
 | Phoenix UI/API/OTLP | `https://ttdudd7d--phoenix.modal.run` | totéž |
 
-Tokeny: `/usr/local/etc/qmd-server.conf` + `/usr/local/etc/pi-phoenix.conf` (chmod 600).
+Tokeny: `~/.local/etc/pi-memory.conf` (unifikovaný, chmod 600; override
+`PI_MEMORY_CONF=/path`).
 Správa Proxy Tokenů: modal.com dashboard → Settings → Proxy Tokens.
 
 ## Architektura

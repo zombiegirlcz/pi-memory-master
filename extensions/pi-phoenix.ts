@@ -9,7 +9,9 @@
  * Config (env overrides conf file):
  *   PI_PHOENIX_URL    e.g. https://ttdudd7d--phoenix.modal.run
  *   PI_PHOENIX_TOKEN  Modal proxy token "wk-xxx.ws-yyy" (Bearer)
- * Conf file: /root/.local/etc/pi-phoenix.conf  (KEY=VALUE lines)
+ * Conf file: ~/.local/etc/pi-memory.conf  (UNIFIED, KEY=VALUE lines)
+ *   — same file is read by bin/qmd-server and bin/qmd-shim; override with
+ *   PI_MEMORY_CONF=/path/to/file
  *
  * Project name in Phoenix: "pi" (resource service.name).
  * If URL/token missing the extension stays inert — zero overhead.
@@ -17,6 +19,8 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import * as _sdk from "@opentelemetry/sdk-trace-base";
 import * as _otlp from "@opentelemetry/exporter-trace-otlp-proto";
 import * as _res from "@opentelemetry/resources";
@@ -38,21 +42,32 @@ const Resource = resm.Resource;
 
 interface Conf { url?: string; token?: string; project?: string }
 
+function confPath(): string {
+	return process.env.PI_MEMORY_CONF ?? join(homedir(), ".local", "etc", "pi-memory.conf");
+}
+
 function loadConf(): Conf {
 	const c: Conf = {
 		url: process.env.PI_PHOENIX_URL,
 		token: process.env.PI_PHOENIX_TOKEN,
 		project: process.env.PI_PHOENIX_PROJECT ?? "pi",
 	};
+	let modalKey: string | undefined;
+	let modalSecret: string | undefined;
 	try {
-		const txt = readFileSync("/root/.local/etc/pi-phoenix.conf", "utf8");
+		const txt = readFileSync(confPath(), "utf8");
 		for (const line of txt.split("\n")) {
 			const m = line.match(/^\s*([A-Z_]+)\s*=\s*(.+?)\s*$/);
 			if (!m) continue;
 			if (m[1] === "PI_PHOENIX_URL" && !c.url) c.url = m[2];
 			if (m[1] === "PI_PHOENIX_TOKEN" && !c.token) c.token = m[2];
+			if (m[1] === "MODAL_KEY") modalKey = m[2];
+			if (m[1] === "MODAL_SECRET") modalSecret = m[2];
 		}
 	} catch { /* no conf file */ }
+	// Fallback: when only one Modal proxy token is configured (setup.sh writes
+	// a single pair), derive the Phoenix bearer as MODAL_KEY.MODAL_SECRET.
+	if (!c.token && modalKey && modalSecret) c.token = `${modalKey}.${modalSecret}`;
 	return c;
 }
 

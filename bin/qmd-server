@@ -5,7 +5,7 @@
 #   qmd-server stop      stop it (no-op in remote mode)
 #   qmd-server status    probe and report
 #
-# Remote mode activates when /usr/local/etc/qmd-server.conf defines
+# Remote mode activates when ~/.local/etc/pi-memory.conf defines
 # QMD_REMOTE_URL. Auth: Modal Proxy Token (MODAL_KEY/MODAL_SECRET), sent as
 #   Authorization: Bearer <key>.<secret>
 #
@@ -17,7 +17,7 @@
 #   - pidfiles /tmp/qmd-server.pid + watchdog, log /tmp/qmd-http.log
 #   - 60 min idle -> auto stop (real requests only count as activity)
 
-CONF=/usr/local/etc/qmd-server.conf
+CONF="${PI_MEMORY_CONF:-$HOME/.local/etc/pi-memory.conf}"
 [ -f "$CONF" ] && . "$CONF"
 
 PORT="${QMD_PORT:-8182}"
