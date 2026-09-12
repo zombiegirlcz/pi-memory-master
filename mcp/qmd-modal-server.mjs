@@ -160,6 +160,75 @@ async function probe(label, url, token, path) {
   }
 }
 
+// --------------------------------------------------- remote QMD MCP client
+// The deployed qmd-mcp server exposes an MCP endpoint (JSON-RPC over HTTP,
+// SSE-framed) at /mcp with tools: query, get, multi_get, status. These
+// wrappers proxy them so pi-mcp gets the full qmd feature set.
+
+function qmdEndpoint() {
+  const conf = loadConf();
+  if (!conf.QMD_REMOTE_URL) throw new Error(`QMD_REMOTE_URL not configured in ${confPath()}`);
+  return `${conf.QMD_REMOTE_URL.replace(/\/$/, "")}/mcp`;
+}
+
+function parseSseJson(raw) {
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("{")) {
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      /* fall through to SSE scan */
+    }
+  }
+  for (const line of raw.split("\n")) {
+    const s = line.trim();
+    if (s.startsWith("data:")) {
+      const json = s.slice(5).trim();
+      if (json.startsWith("{")) {
+        try {
+          return JSON.parse(json);
+        } catch {
+          /* keep scanning */
+        }
+      }
+    }
+  }
+  return null;
+}
+
+async function mcpCall(toolName, args = {}, timeoutMs = 180_000) {
+  const conf = loadConf();
+  const res = await fetch(qmdEndpoint(), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+      Authorization: `Bearer ${qmdToken(conf)}`,
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: toolName, arguments: args },
+    }),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  const raw = await res.text();
+  if (!res.ok) return { isError: true, text: `HTTP ${res.status}\n${trunc(raw)}` };
+  const payload = parseSseJson(raw);
+  if (!payload) return { isError: true, text: `unparseable MCP response:\n${trunc(raw)}` };
+  if (payload.error) {
+    return { isError: true, text: `MCP error ${payload.error.code ?? "?"}: ${payload.error.message ?? ""}` };
+  }
+  const result = payload.result ?? {};
+  const structured = result.structuredContent;
+  const text = (result.content ?? [])
+    .map((c) => (c.type === "text" ? c.text : c.type === "resource" ? c.resource?.text ?? "" : ""))
+    .filter(Boolean)
+    .join("\n");
+  return { isError: !!result.isError, text: structured ? JSON.stringify(structured, null, 2) : text };
+}
+
 // -------------------------------------------------------------- tool table
 
 const TOOLS = [
@@ -280,6 +349,101 @@ const TOOLS = [
           signal: AbortSignal.timeout(120_000),
         });
         return { isError: !r.ok, text: `HTTP ${r.status}\n${trunc(await r.text())}` };
+      } catch (e) {
+        return { isError: true, text: `request failed: ${e?.message ?? e}` };
+      }
+    },
+  },
+  {
+    name: "qmd_query",
+    description:
+      "Full-featured QMD query against the remote index: typed sub-queries (lex/vec/hyde) fused via RRF and optionally LLM-reranked. Use 'query' for plain text (auto-expanded) OR 'searches' for precise control. Returns structured results with file/docid/line for follow-up qmd_get.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Plain-text query, auto-expanded into lex/vec/hyde variants. Mutually exclusive with 'searches'." },
+        searches: {
+          type: "array",
+          description: "Typed sub-queries; first gets 2x weight. Mutually exclusive with 'query'.",
+          items: {
+            type: "object",
+            properties: {
+              type: { type: "string", enum: ["lex", "vec", "hyde"] },
+              query: { type: "string" },
+            },
+            required: ["type", "query"],
+          },
+        },
+        limit: { type: "number", description: "Max results (default 10)." },
+        minScore: { type: "number", description: "Min relevance 0-1 (default 0)." },
+        candidateLimit: { type: "number", description: "Max candidates to rerank (default 40)." },
+        collections: { type: "array", items: { type: "string" }, description: "Filter to collections (OR match)." },
+        intent: { type: "string", description: "Background context to disambiguate the query." },
+        rerank: { type: "boolean", description: "Rerank with LLM (default true; false is faster on CPU)." },
+      },
+      additionalProperties: false,
+    },
+    handler: async (args) => {
+      try {
+        return await mcpCall("query", args);
+      } catch (e) {
+        return { isError: true, text: `request failed: ${e?.message ?? e}` };
+      }
+    },
+  },
+  {
+    name: "qmd_get",
+    description:
+      "Retrieve the full content of one QMD document by file path or docid (from search results). Supports line-range suffixes ('foo.md:100' or 'foo.md:100:40') and fromLine/maxLines/lineNumbers.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        file: { type: "string", description: "File path or docid, optionally with :line or :from:count suffix." },
+        fromLine: { type: "number", description: "Start line (1-indexed)." },
+        maxLines: { type: "number", description: "Max lines to return." },
+        lineNumbers: { type: "boolean", description: "Prefix line numbers (default true)." },
+      },
+      required: ["file"],
+      additionalProperties: false,
+    },
+    handler: async (args) => {
+      try {
+        return await mcpCall("get", args);
+      } catch (e) {
+        return { isError: true, text: `request failed: ${e?.message ?? e}` };
+      }
+    },
+  },
+  {
+    name: "qmd_multi_get",
+    description:
+      "Retrieve multiple QMD documents by glob pattern (e.g. 'journals/2025-05*.md'), comma-separated list, or docids. Skips files larger than maxBytes.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pattern: { type: "string", description: "Glob pattern, docid, or comma-separated list." },
+        maxLines: { type: "number", description: "Max lines per file." },
+        maxBytes: { type: "number", description: "Skip files larger than this (default 65536)." },
+        lineNumbers: { type: "boolean", description: "Prefix line numbers (default true)." },
+      },
+      required: ["pattern"],
+      additionalProperties: false,
+    },
+    handler: async (args) => {
+      try {
+        return await mcpCall("multi_get", args);
+      } catch (e) {
+        return { isError: true, text: `request failed: ${e?.message ?? e}` };
+      }
+    },
+  },
+  {
+    name: "qmd_status",
+    description: "QMD index status from the server: total documents, needs-embedding, vector index, and per-collection counts.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    handler: async () => {
+      try {
+        return await mcpCall("status", {});
       } catch (e) {
         return { isError: true, text: `request failed: ${e?.message ?? e}` };
       }

@@ -32,6 +32,10 @@ takže se po instalaci **sám zaregistruje** v pi-mcp pod jménem
 | `diag` / `caretaker` / `check_llm_env` | diagnostika a údržba |
 | `health` | probe `qmd-mcp /health` + `phoenix /ping` |
 | `search` | vzdálený QMD dotaz (`lex`/`vec`/`hybrid`, `collection`, `limit`, `rerank`) |
+| `qmd_query` | plný QMD `query` (typed `lex`/`vec`/`hyde` sub-queries, `intent`, `collections`, `minScore`, RRF + rerank) |
+| `qmd_get` | přečti dokument podle cesty/docid (i `:line` / `:from:count`) |
+| `qmd_multi_get` | více dokumentů globem / seznamem / docids |
+| `qmd_status` | stav indexu: dokumenty, needs-embedding, vector index, kolekce |
 
 Server lokalizuje `qmd-modal/` přes `QMD_MODAL_DIR`, strom balíčku nebo
 `/usr/local/share/qmd-modal`; config čte z `~/.local/etc/pi-memory.conf`.
