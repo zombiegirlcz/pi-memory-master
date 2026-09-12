@@ -83,13 +83,19 @@ export default function (pi: ExtensionAPI) {
 		headers: { authorization: `Bearer ${conf.token}` },
 		timeoutMillis: 120_000, // Modal cold start can take ~30-60s
 	});
-	try {
-		(api.diag ?? ({ setLogger() {} })).setLogger(
-			new (api.DiagConsoleLogger ?? function () {})(
-				(api.DiagLogLevel ?? { INFO: 30, ERROR: 50 }).ERROR
-			)
-		);
-	} catch { /* ignore */ }
+	// OTel diag is a process-wide singleton: a second setLogger (e.g. after
+	// /reload) logs "Current logger will overwrite one already registered",
+	// and at ERROR level every OTLP export failure becomes a noisy popup.
+	// Keep it opt-in via PI_PHOENIX_DEBUG=1.
+	if (process.env.PI_PHOENIX_DEBUG === "1") {
+		try {
+			(api.diag ?? ({ setLogger() {} })).setLogger(
+				new (api.DiagConsoleLogger ?? function () {})(
+					(api.DiagLogLevel ?? { INFO: 30, ERROR: 50 }).ERROR
+				)
+			);
+		} catch { /* ignore */ }
+	}
 	const provider = new BasicTracerProvider({
 		resource: new Resource({
 			"service.name": conf.project ?? "pi",
