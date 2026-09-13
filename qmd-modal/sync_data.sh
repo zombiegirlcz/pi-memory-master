@@ -7,6 +7,7 @@
 # Usage: ./sync_data.sh
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO=/root/docs_config_memo
 VOL=qmd
 OUT=/tmp/qmd-src.tar
@@ -22,5 +23,5 @@ modal volume put --force "$VOL" "$OUT" src.tar >/dev/null
 modal volume put --force "$VOL" /root/qmd-modal/index.modal.yml index/index.yml >/dev/null
 
 echo "[3/3] extracting on Modal..."
-modal run /root/qmd-modal/infra.py::sync_data
+modal run "$SCRIPT_DIR/infra.py"::sync_data
 echo "DONE"

@@ -434,8 +434,11 @@ ln -sfn /mnt/qmd/index /root/.qmd
 )
 def sync_data():
     """Extract uploaded src.tar into place; commit volume."""
-    import subprocess, tarfile, os
+    import shutil, subprocess, tarfile, os
 
+    # Remove the previous tree so deletions on the phone propagate to the
+    # volume (a plain tar extract never deletes files that vanished from src.tar).
+    shutil.rmtree("/mnt/qmd/src/docs_config_memo", ignore_errors=True)
     os.makedirs("/mnt/qmd/src/docs_config_memo", exist_ok=True)
     with tarfile.open("/mnt/qmd/src.tar") as t:
         t.extractall("/mnt/qmd/src/docs_config_memo")
@@ -757,3 +760,61 @@ def check_llm_env():
         print("opencode test:", r.status_code, r.json().get("choices", [{}])[0].get("message", {}).get("content", "")[:50])
     except Exception as e:
         print("opencode test FAIL:", e)
+
+
+# ============================================================= db repair ====
+
+@app.function(
+    image=qmd_image.apt_install("sqlite3"),
+    volumes={"/mnt/qmd": qmd_vol},
+    cpu=2.0,
+    memory=8192,
+    timeout=3600,
+)
+def repair_db():
+    """Opraví poškozený SQLite index na volume (stale WAL/SHM -> .recover ->
+    VACUUM INTO). Spusť, když `qmd update` hlásí 'database disk image is
+    malformed'. Index.yml i dokumenty zůstávají; embeddingy se zachovají,
+    pokud jsou čitelné."""
+    import os, shutil, subprocess
+
+    db = "/mnt/qmd/index/index.sqlite"
+    if not os.path.exists(db):
+        print("no db; nothing to repair")
+        return
+    print("size:", os.path.getsize(db))
+
+    for ext in ("-wal", "-shm"):
+        p = db + ext
+        if os.path.exists(p):
+            print("removing", p, os.path.getsize(p))
+            os.remove(p)
+
+    def sqlite(dbpath, sql):
+        return subprocess.run(["sqlite3", dbpath, sql], capture_output=True, text=True)
+
+    print("integrity_check:", sqlite(db, "PRAGMA integrity_check;").stdout[:300].strip())
+
+    fixed = "/tmp/index_fixed.sqlite"
+    if os.path.exists(fixed):
+        os.remove(fixed)
+
+    # 1) best-effort .recover
+    subprocess.run(["bash", "-c", f"sqlite3 '{db}' .recover > /tmp/recover.sql 2>/dev/null; true"])
+    if os.path.exists("/tmp/recover.sql") and os.path.getsize("/tmp/recover.sql") > 0:
+        r = subprocess.run(["bash", "-c", f"sqlite3 '{fixed}' < /tmp/recover.sql"], capture_output=True, text=True)
+        if r.returncode == 0 and os.path.exists(fixed) and os.path.getsize(fixed) > 0:
+            print("recovered integrity:", sqlite(fixed, "PRAGMA integrity_check;").stdout[:120].strip())
+            shutil.move(fixed, db)
+            print("REPLACED with recovered db")
+            qmd_vol.commit()
+            return
+
+    # 2) fallback: VACUUM INTO
+    r = subprocess.run(["bash", "-c", f"sqlite3 '{db}' \"VACUUM INTO '{fixed}'\""], capture_output=True, text=True)
+    if r.returncode == 0 and os.path.exists(fixed):
+        shutil.move(fixed, db)
+        print("REPLACED with vacuumed db")
+        qmd_vol.commit()
+    else:
+        print("repair failed:", r.stderr[:300])

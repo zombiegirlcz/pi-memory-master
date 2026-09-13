@@ -36,6 +36,8 @@ takže se po instalaci **sám zaregistruje** v pi-mcp pod jménem
 | `qmd_get` | přečti dokument podle cesty/docid (i `:line` / `:from:count`) |
 | `qmd_multi_get` | více dokumentů globem / seznamem / docids |
 | `qmd_status` | stav indexu: dokumenty, needs-embedding, vector index, kolekce |
+| `repair_db` | oprava poškozeného SQLite indexu (`database disk image is malformed`) |
+| `memory_write_sync` | zápis do pi-memory v nativním formátu + volitelný `sync_memory` |
 
 Server lokalizuje `qmd-modal/` přes `QMD_MODAL_DIR`, strom balíčku nebo
 `/usr/local/share/qmd-modal`; config čte z `~/.local/etc/pi-memory.conf`.

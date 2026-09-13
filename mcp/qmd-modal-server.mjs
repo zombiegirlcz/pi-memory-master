@@ -24,7 +24,7 @@
  * Logs go to stderr only — stdout is reserved for the MCP protocol.
  */
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -61,6 +61,51 @@ const MODAL_DIR = findModalDir();
 
 function confPath() {
   return process.env.PI_MEMORY_CONF ?? join(homedir(), ".local", "etc", "pi-memory.conf");
+}
+
+// --------------------------------------------------------------- memory io
+// Mirrors pi-memory's layout/format so entries written here are picked up by
+// memory_read/memory_search unchanged.
+
+function memoryDir() {
+  if (process.env.PI_MEMORY_DIR) return process.env.PI_MEMORY_DIR;
+  const primary = join(homedir(), ".pi", "agent", "memory");
+  if (existsSync(primary)) return primary;
+  return join(homedir(), "docs_config_memo", ".pi", "agent", "memory");
+}
+
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+function nowStamp() {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+}
+
+function todayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function memoryTargetPath(target, date) {
+  const dir = memoryDir();
+  if (target === "long_term") return join(dir, "MEMORY.md");
+  if (target === "scratchpad") return join(dir, "SCRATCHPAD.md");
+  return join(dir, "daily", `${date ?? todayStr()}.md`);
+}
+
+function appendMemory(target, content, date) {
+  const filePath = memoryTargetPath(target, date);
+  mkdirSync(dirname(filePath), { recursive: true });
+  const sid = (process.env.PI_SESSION_ID ?? "mcp").slice(0, 8);
+  const stamp = `<!-- ${nowStamp()} [${sid}] -->`;
+  const body = target === "scratchpad" ? `- [ ] ${content}` : content;
+  const stamped = `${stamp}\n${body}\n`;
+  const existing = existsSync(filePath) ? readFileSync(filePath, "utf8") : "";
+  const separator = existing.trim() ? (existing.endsWith("\n\n") ? "" : "\n\n") : "";
+  appendFileSync(filePath, `${separator}${stamped}`, "utf8");
+  return filePath;
 }
 
 function loadConf() {
@@ -282,6 +327,13 @@ const TOOLS = [
     handler: async () => fmt("modal run infra.py::rebuild_pi_memory", await modalRun("rebuild_pi_memory", 1_800_000)),
   },
   {
+    name: "repair_db",
+    description:
+      "Repair the qmd SQLite index on the Modal volume (stale WAL/SHM removal, .recover, VACUUM INTO). Use when qmd update reports 'database disk image is malformed'.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    handler: async () => fmt("modal run infra.py::repair_db", await modalRun("repair_db", 3_600_000)),
+  },
+  {
     name: "diag",
     description: "In-container diagnostics: glob tests, index.sqlite state, collection/doc listing. Runs `modal run infra.py::diag`.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
@@ -447,6 +499,39 @@ const TOOLS = [
       } catch (e) {
         return { isError: true, text: `request failed: ${e?.message ?? e}` };
       }
+    },
+  },
+  {
+    name: "memory_write_sync",
+    description:
+      "Append to pi-memory in its native format (timestamp comment + body), then optionally run sync_memory so the remote QMD index sees it immediately. Targets: daily (today), long_term (MEMORY.md), scratchpad.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        target: { type: "string", enum: ["daily", "long_term", "scratchpad"], description: "Which memory file to append to (default daily)." },
+        content: { type: "string", description: "Markdown to append (for scratchpad, a single checklist item without the '- [ ] ' prefix)." },
+        sync: { type: "boolean", description: "Run sync_memory.sh afterwards to refresh the remote index (default true)." },
+        date: { type: "string", description: "Daily log date YYYY-MM-DD (default today)." },
+      },
+      required: ["content"],
+      additionalProperties: false,
+    },
+    handler: async (args) => {
+      const target = args.target || "daily";
+      let filePath;
+      try {
+        filePath = appendMemory(target, String(args.content ?? ""), args.date);
+      } catch (e) {
+        return { isError: true, text: `write failed: ${e?.message ?? e}` };
+      }
+      let out = `wrote to ${filePath}`;
+      const shouldSync = args.sync !== false;
+      if (shouldSync) {
+        const r = await bashScript("sync_memory.sh");
+        out += `\n\n--- sync_memory.sh ---\n${fmt("bash sync_memory.sh", r)}`;
+        return { isError: r.code !== 0, text: out };
+      }
+      return out;
     },
   },
 ];
