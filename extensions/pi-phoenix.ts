@@ -11,15 +11,14 @@
  * (bash: args.command; others: pretty JSON) into input.value and the tool
  * output into output.value.
  *
- * One fixed Phoenix project (default "pi", override PI_PHOENIX_PROJECT).
- * The session folder is attached to every span as `session.cwd` / `session.id`
- * / `session.file`, so you can filter or group per session inside the project
- * without switching projects (which was fragile).
+ * Project is FIXED to "pi" (no env override). The session folder is attached
+ * to every span as `session.cwd` / `session.id` / `session.file`, so you can
+ * filter per session inside the project. `/phoenix-url` prints a ready-made
+ * link with the Phoenix span filter `spanFilterCondition` applied.
  *
  * Config (env overrides conf file):
  *   PI_PHOENIX_URL      e.g. https://ttdudd7d--phoenix.modal.run
  *   PI_PHOENIX_TOKEN    Modal proxy token "wk-xxx.ws-yyy" (Bearer)
- *   PI_PHOENIX_PROJECT  fixed project name (default "pi")
  * Conf file: ~/.local/etc/pi-memory.conf  (UNIFIED, KEY=VALUE lines)
  *   — same file is read by bin/qmd-server and bin/qmd-shim; override with
  *   PI_MEMORY_CONF=/path/to/file
@@ -58,7 +57,8 @@ function makeResource(attributes: Record<string, unknown>): unknown {
 	return attributes;
 }
 
-interface Conf { url?: string; token?: string; project?: string }
+const PROJECT = "pi";
+interface Conf { url?: string; token?: string }
 
 function confPath(): string {
 	return process.env.PI_MEMORY_CONF ?? join(homedir(), ".local", "etc", "pi-memory.conf");
@@ -68,7 +68,6 @@ function loadConf(): Conf {
 	const c: Conf = {
 		url: process.env.PI_PHOENIX_URL,
 		token: process.env.PI_PHOENIX_TOKEN,
-		project: process.env.PI_PHOENIX_PROJECT,
 	};
 	let modalKey: string | undefined;
 	let modalSecret: string | undefined;
@@ -93,10 +92,6 @@ const MAX_ATTR = 8000;
 
 function clip(s: string, n = MAX_ATTR): string {
 	return s.length > n ? `${s.slice(0, n)}\n…(+${s.length - n} chars)` : s;
-}
-
-function sanitizeProject(name: string): string {
-	return (name.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "pi").slice(0, 60);
 }
 
 /** Best-effort text extraction from a pi tool result / message content. */
@@ -126,18 +121,49 @@ function toolInputText(args: unknown): string {
 	}
 }
 
+/** Phoenix span filter expression for one session folder. */
+function filterExpr(cwd: string): string {
+	return `session.cwd == '${cwd.replace(/'/g, "\\'")}'`;
+}
+
+/** Look up the Phoenix project id by name via the REST API. */
+async function projectId(base: string, token: string, name: string): Promise<string | null> {
+	try {
+		const r = await fetch(`${base.replace(/\/$/, "")}/v1/projects`, {
+			headers: { authorization: `Bearer ${token}` },
+			signal: AbortSignal.timeout(60_000),
+		});
+		if (!r.ok) return null;
+		const j: any = await r.json();
+		const found = (j?.data ?? []).find((p: any) => p?.name === name);
+		return found?.id ?? null;
+	} catch {
+		return null;
+	}
+}
+
+/** Ready-made Phoenix URL for spans of this session folder. */
+async function sessionUrl(base: string, token: string, cwd: string | undefined): Promise<string> {
+	const b = base.replace(/\/$/, "");
+	const pid = await projectId(b, token, PROJECT);
+	const params = new URLSearchParams({ token });
+	if (cwd) params.set("spanFilterCondition", filterExpr(cwd));
+	const root = pid ? `${b}/projects/${pid}/spans` : `${b}/`;
+	return `${root}?${params.toString()}`;
+}
+
 export default function (pi: ExtensionAPI) {
 	const conf = loadConf();
 	if (!conf.url || !conf.token) {
 		console.log("[pi-phoenix] not configured (no URL/token) — inert");
 		return;
 	}
-
-	const projectName = sanitizeProject(conf.project?.trim() || "pi");
+	const baseUrl = conf.url.replace(/\/$/, "");
+	const token = conf.token;
 
 	const exporter = new OTLPTraceExporter({
-		url: `${conf.url.replace(/\/$/, "")}/v1/traces`,
-		headers: { authorization: `Bearer ${conf.token}` },
+		url: `${baseUrl}/v1/traces`,
+		headers: { authorization: `Bearer ${token}` },
 		timeoutMillis: 120_000, // Modal cold start can take ~30-60s
 	});
 	// OTel diag is a process-wide singleton: a second setLogger (e.g. after
@@ -158,10 +184,10 @@ export default function (pi: ExtensionAPI) {
 	let tracer: any = null;
 	try {
 		const resource = makeResource({
-			"service.name": projectName,
+			"service.name": PROJECT,
 			"service.namespace": "pi-coding-agent",
 			// Phoenix groups traces into projects by this attribute
-			"openinference.project.name": projectName,
+			"openinference.project.name": PROJECT,
 		});
 		const spanProcessor = new BatchSpanProcessor(exporter, { scheduledDelayMillis: 5000 });
 		// OTel v2 takes processors via the constructor and removed
@@ -181,6 +207,7 @@ export default function (pi: ExtensionAPI) {
 	let turnSpan: any = null;
 	let turnPrompt = "";
 	let sessionAttrs: Record<string, unknown> = {};
+	let sessionCwd: string | undefined;
 
 	pi.on("session_start", async (_event, ctx) => {
 		try {
@@ -188,6 +215,7 @@ export default function (pi: ExtensionAPI) {
 			const cwd: string | undefined = sm?.getCwd?.();
 			const sid: string | undefined = sm?.getSessionId?.();
 			const file: string | undefined = sm?.getSessionFile?.();
+			sessionCwd = cwd;
 			sessionAttrs = {
 				...(sid ? { "session.id": sid } : {}),
 				...(cwd ? { "session.cwd": cwd } : {}),
@@ -316,16 +344,23 @@ export default function (pi: ExtensionAPI) {
 		return undefined;
 	});
 
-	// helper command to verify wiring
-	pi.registerCommand("phoenix-status", {
-		description: "Show pi-phoenix tracing target",
-		handler: async (_args, ctx) => {
-			ctx.ui.notify(
-				`[pi-phoenix] exporting to ${conf.url} (project: ${projectName})`,
-				"info"
-			);
+	// Phoenix URL for this session's folder (filtered spans view).
+	pi.registerCommand("phoenix-url", {
+		description: "Print a Phoenix URL filtered to this session folder",
+		handler: async (args, ctx) => {
+			const cwd = (args || "").trim() || sessionCwd;
+			const url = await sessionUrl(baseUrl, token, cwd);
+			console.log(`[pi-phoenix] ${url}`);
+			ctx.ui.notify(`[pi-phoenix] ${url}`, "info");
 		},
 	});
 
-	console.log(`[pi-phoenix] tracing → ${conf.url} (project: ${projectName})`);
+	pi.registerCommand("phoenix-status", {
+		description: "Show pi-phoenix tracing target",
+		handler: async (_args, ctx) => {
+			ctx.ui.notify(`[pi-phoenix] exporting to ${baseUrl} (project: ${PROJECT})`, "info");
+		},
+	});
+
+	console.log(`[pi-phoenix] tracing → ${baseUrl} (project: ${PROJECT})`);
 }

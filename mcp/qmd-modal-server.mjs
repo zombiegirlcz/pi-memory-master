@@ -502,6 +502,40 @@ const TOOLS = [
     },
   },
   {
+    name: "phoenix_url",
+    description:
+      "Build a Phoenix URL for the 'pi' project. With cwd (default: PI_SESSION_CWD or /root) it adds the span filter spanFilterCondition=session.cwd=='<cwd>' so you see only that session folder. Opens the token-authenticated UI.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        cwd: { type: "string", description: "Session folder to filter on (default: $PI_SESSION_CWD or /root)." },
+      },
+      additionalProperties: false,
+    },
+    handler: async (args) => {
+      const conf = loadConf();
+      if (!conf.PI_PHOENIX_URL) return { isError: true, text: `PI_PHOENIX_URL not configured in ${confPath()}` };
+      const base = conf.PI_PHOENIX_URL.replace(/\/$/, "");
+      const token = conf.PI_PHOENIX_TOKEN ?? `${conf.MODAL_KEY}.${conf.MODAL_SECRET}`;
+      const cwd = args.cwd || process.env.PI_SESSION_CWD || "/root";
+      let projectId = null;
+      try {
+        const r = await fetch(`${base}/v1/projects`, {
+          headers: { authorization: `Bearer ${token}` },
+          signal: AbortSignal.timeout(60_000),
+        });
+        if (r.ok) {
+          const j = await r.json();
+          projectId = (j?.data ?? []).find((p) => p?.name === "pi")?.id ?? null;
+        }
+      } catch { /* fall back to root */ }
+      const params = new URLSearchParams({ token });
+      params.set("spanFilterCondition", `session.cwd == '${String(cwd).replace(/'/g, "\\'")}'`);
+      const url = projectId ? `${base}/projects/${projectId}/spans` : `${base}/`;
+      return `${url}?${params.toString()}`;
+    },
+  },
+  {
     name: "memory_write_sync",
     description:
       "Append to pi-memory in its native format (timestamp comment + body), then optionally run sync_memory so the remote QMD index sees it immediately. Targets: daily (today), long_term (MEMORY.md), scratchpad.",
