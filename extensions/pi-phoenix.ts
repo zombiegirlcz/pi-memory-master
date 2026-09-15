@@ -38,7 +38,14 @@ const trace = api.trace;
 const BatchSpanProcessor = sdk.BatchSpanProcessor;
 const BasicTracerProvider = sdk.BasicTracerProvider;
 const OTLPTraceExporter = otlp.OTLPTraceExporter;
-const Resource = resm.Resource;
+// OTel v1 exposed `Resource`; v2 replaced it with `resourceFromAttributes`.
+const ResourceCtor = resm.Resource;
+const resourceFromAttributes = resm.resourceFromAttributes;
+function makeResource(attributes: Record<string, unknown>): unknown {
+	if (typeof ResourceCtor === "function") return new ResourceCtor(attributes);
+	if (typeof resourceFromAttributes === "function") return resourceFromAttributes(attributes);
+	return attributes;
+}
 
 interface Conf { url?: string; token?: string; project?: string }
 
@@ -96,15 +103,27 @@ export default function (pi: ExtensionAPI) {
 			);
 		} catch { /* ignore */ }
 	}
-	const provider = new BasicTracerProvider({
-		resource: new Resource({
+	let provider: any;
+	try {
+		const resource = makeResource({
 			"service.name": conf.project ?? "pi",
 			"service.namespace": "pi-coding-agent",
 			// Phoenix groups traces by this attribute (not service.name)
 			"openinference.project.name": conf.project ?? "pi",
-		}),
-	});
-	provider.addSpanProcessor(new BatchSpanProcessor(exporter, { scheduledDelayMillis: 5000 }));
+		});
+		const spanProcessor = new BatchSpanProcessor(exporter, { scheduledDelayMillis: 5000 });
+		// OTel v2 takes processors via the constructor and removed
+		// addSpanProcessor(); v1 needs the explicit addSpanProcessor() call.
+		const legacyProvider =
+			typeof (BasicTracerProvider as any)?.prototype?.addSpanProcessor === "function";
+		provider = legacyProvider
+			? new BasicTracerProvider({ resource })
+			: new BasicTracerProvider({ resource, spanProcessors: [spanProcessor] });
+		if (legacyProvider) provider.addSpanProcessor(spanProcessor);
+	} catch (e) {
+		console.error("[pi-phoenix] tracer provider init failed — extension inert:", e);
+		return;
+	}
 	// bind tracer DIRECTLY to this provider — immune to global-registry/dual-copy hazards
 	const tracer = provider.getTracer("pi-phoenix", "1.0.0");
 
